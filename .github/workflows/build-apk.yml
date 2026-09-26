@@ -15,17 +15,18 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Extract Android project ZIP
         run: |
+          rm -rf project
           mkdir -p project
           unzip -o ASR-Academy-Android-Project.zip -d project
           echo "Project extracted successfully."
           find project -maxdepth 3 -type f | sort | head -100
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -35,27 +36,30 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Fix Java JVM target
+      - name: Force Java and Kotlin JVM target to 17
         working-directory: project
         run: |
-          echo "Checking Gradle files..."
-
+          echo "Gradle files before fix:"
           find . -name "*.gradle" -type f -print
 
-          echo "Replacing Java 1.8 with Java 17..."
+          cat >> app/build.gradle <<'EOF'
 
-          find . -name "*.gradle" -type f -exec sed -i \
-            -e 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' \
-            -e 's/sourceCompatibility[[:space:]]*=[[:space:]]*1\.8/sourceCompatibility = JavaVersion.VERSION_17/g' \
-            -e 's/targetCompatibility[[:space:]]*=[[:space:]]*1\.8/targetCompatibility = JavaVersion.VERSION_17/g' \
-            {} \;
+          // CI compatibility: compile Java and Kotlin to the same JVM target.
+          android {
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
 
-          echo "Java target fix completed."
+          echo "Applied Java 17 compileOptions."
+          grep -n -A8 -B2 "CI compatibility" app/build.gradle || true
 
       - name: Build debug APK
         working-directory: project
         run: |
-          gradle assembleDebug --no-daemon --stacktrace
+          gradle clean assembleDebug --no-daemon --stacktrace
 
       - name: Show generated APK
         working-directory: project
@@ -63,9 +67,15 @@ jobs:
           echo "Generated APK files:"
           find . -type f -name "*.apk" -print
 
+      - name: Rename APK
+        working-directory: project
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/ASR-Academy.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ASR-Academy-debug
-          path: project/app/build/outputs/apk/debug/app-debug.apk
+          name: ASR-Academy
+          path: project/app/build/outputs/apk/debug/ASR-Academy.apk
           if-no-files-found: error
+          
