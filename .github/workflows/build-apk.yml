@@ -23,7 +23,6 @@ jobs:
           mkdir -p project
           unzip -o ASR-Academy-Android-Project.zip -d project
           echo "Project extracted successfully."
-          find project -maxdepth 3 -type f | sort | head -100
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -36,15 +35,29 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Force Java and Kotlin JVM target to 17
+      - name: Fix Android source and JVM targets
         working-directory: project
+        shell: bash
         run: |
-          echo "Gradle files before fix:"
-          find . -name "*.gradle" -type f -print
+          set -euo pipefail
 
+          # Fix: LaunchedEffect requires at least one key parameter.
+          # Replace keyless calls with LaunchedEffect(Unit) { ... }
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/src/main/java/pk/asr/academy/MainActivity.kt")
+          text = path.read_text()
+          fixed = text.replace("LaunchedEffect {", "LaunchedEffect(Unit) {")
+          if fixed == text:
+              raise SystemExit("ERROR: Expected keyless LaunchedEffect call was not found")
+          path.write_text(fixed)
+          print("Fixed LaunchedEffect calls in MainActivity.kt")
+          PY
+
+          # Keep Java and Kotlin on same JVM target.
           cat >> app/build.gradle <<'EOF'
 
-          // CI compatibility: compile Java and Kotlin to the same JVM target.
           android {
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -53,24 +66,17 @@ jobs:
           }
           EOF
 
-          echo "Applied Java 17 compileOptions."
-          grep -n -A8 -B2 "CI compatibility" app/build.gradle || true
-
       - name: Build debug APK
         working-directory: project
-        run: |
-          gradle clean assembleDebug --no-daemon --stacktrace
+        run: gradle clean assembleDebug --no-daemon --stacktrace
 
       - name: Show generated APK
         working-directory: project
-        run: |
-          echo "Generated APK files:"
-          find . -type f -name "*.apk" -print
+        run: find . -type f -name "*.apk" -print
 
       - name: Rename APK
         working-directory: project
-        run: |
-          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/ASR-Academy.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/ASR-Academy.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -78,4 +84,3 @@ jobs:
           name: ASR-Academy
           path: project/app/build/outputs/apk/debug/ASR-Academy.apk
           if-no-files-found: error
-          
