@@ -21,8 +21,7 @@ jobs:
         run: |
           mkdir -p project
           unzip -o ASR-Academy-Android-Project.zip -d project
-
-          echo "Android project extracted:"
+          echo "Project extracted successfully."
           find project -maxdepth 3 -type f | sort | head -100
 
       - name: Set up JDK 17
@@ -36,58 +35,32 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Fix Java and Kotlin JVM targets
+      - name: Fix Java JVM target
         working-directory: project
-        shell: bash
         run: |
-          echo "Searching Gradle files..."
+          echo "Checking Gradle files..."
 
-          find . -name "*.gradle" -o -name "*.gradle.kts"
+          find . -name "*.gradle" -type f -print
 
-          echo "Changing Java 1.8 targets to Java 17..."
+          echo "Replacing Java 1.8 with Java 17..."
 
-          find . -name "*.gradle" -type f -print0 | while IFS= read -r -d '' file
-          do
-            sed -i \
-              -e "s/sourceCompatibility[[:space:]]*=[[:space:]]*JavaVersion.VERSION_1_8/sourceCompatibility = JavaVersion.VERSION_17/g" \
-              -e "s/targetCompatibility[[:space:]]*=[[:space:]]*JavaVersion.VERSION_1_8/targetCompatibility = JavaVersion.VERSION_17/g" \
-              -e "s/sourceCompatibility[[:space:]]*=[[:space:]]*1\.8/sourceCompatibility = JavaVersion.VERSION_17/g" \
-              -e "s/targetCompatibility[[:space:]]*=[[:space:]]*1\.8/targetCompatibility = JavaVersion.VERSION_17/g" \
-              "$file"
-          done
+          find . -name "*.gradle" -type f -exec sed -i \
+            -e 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' \
+            -e 's/sourceCompatibility[[:space:]]*=[[:space:]]*1\.8/sourceCompatibility = JavaVersion.VERSION_17/g' \
+            -e 's/targetCompatibility[[:space:]]*=[[:space:]]*1\.8/targetCompatibility = JavaVersion.VERSION_17/g' \
+            {} \;
 
-          echo "Adding Java 17 compile options to app module if needed..."
-
-          if [ -f "app/build.gradle" ]; then
-            cat >> app/build.gradle <<'EOF'
-
-/*
- * ASR Academy CI compatibility
- * Java and Kotlin must use the same JVM target.
- */
-android {
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
-}
-EOF
-          fi
-
-          echo "Final app/build.gradle:"
-          if [ -f "app/build.gradle" ]; then
-            cat app/build.gradle
-          fi
+          echo "Java target fix completed."
 
       - name: Build debug APK
         working-directory: project
         run: |
           gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Find generated APK
+      - name: Show generated APK
         working-directory: project
         run: |
-          echo "Searching for APK..."
+          echo "Generated APK files:"
           find . -type f -name "*.apk" -print
 
       - name: Upload APK
