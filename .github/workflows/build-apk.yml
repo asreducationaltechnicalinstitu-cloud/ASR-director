@@ -3,11 +3,13 @@ name: Build ASR Academy APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
 
@@ -19,7 +21,8 @@ jobs:
         run: |
           mkdir -p project
           unzip -o ASR-Academy-Android-Project.zip -d project
-          echo "Extracted project:"
+
+          echo "Android project extracted:"
           find project -maxdepth 3 -type f | sort | head -100
 
       - name: Set up JDK 17
@@ -33,9 +36,59 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Fix Java and Kotlin JVM targets
+        working-directory: project
+        shell: bash
+        run: |
+          echo "Searching Gradle files..."
+
+          find . -name "*.gradle" -o -name "*.gradle.kts"
+
+          echo "Changing Java 1.8 targets to Java 17..."
+
+          find . -name "*.gradle" -type f -print0 | while IFS= read -r -d '' file
+          do
+            sed -i \
+              -e "s/sourceCompatibility[[:space:]]*=[[:space:]]*JavaVersion.VERSION_1_8/sourceCompatibility = JavaVersion.VERSION_17/g" \
+              -e "s/targetCompatibility[[:space:]]*=[[:space:]]*JavaVersion.VERSION_1_8/targetCompatibility = JavaVersion.VERSION_17/g" \
+              -e "s/sourceCompatibility[[:space:]]*=[[:space:]]*1\.8/sourceCompatibility = JavaVersion.VERSION_17/g" \
+              -e "s/targetCompatibility[[:space:]]*=[[:space:]]*1\.8/targetCompatibility = JavaVersion.VERSION_17/g" \
+              "$file"
+          done
+
+          echo "Adding Java 17 compile options to app module if needed..."
+
+          if [ -f "app/build.gradle" ]; then
+            cat >> app/build.gradle <<'EOF'
+
+/*
+ * ASR Academy CI compatibility
+ * Java and Kotlin must use the same JVM target.
+ */
+android {
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+EOF
+          fi
+
+          echo "Final app/build.gradle:"
+          if [ -f "app/build.gradle" ]; then
+            cat app/build.gradle
+          fi
+
       - name: Build debug APK
         working-directory: project
-        run: gradle assembleDebug --no-daemon
+        run: |
+          gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Find generated APK
+        working-directory: project
+        run: |
+          echo "Searching for APK..."
+          find . -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -43,4 +96,3 @@ jobs:
           name: ASR-Academy-debug
           path: project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          
