@@ -19,10 +19,14 @@ jobs:
 
       - name: Extract Android project ZIP
         run: |
+          set -euo pipefail
+
           rm -rf project
           mkdir -p project
+
           unzip -o ASR-Academy-Android-Project.zip -d project
-          echo "Project extracted successfully."
+
+          echo "Android project extracted successfully."
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -41,21 +45,51 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Fix: LaunchedEffect requires at least one key parameter.
-          # Replace keyless calls with LaunchedEffect(Unit) { ... }
           python3 - <<'PY'
+          import re
           from pathlib import Path
 
           path = Path("app/src/main/java/pk/asr/academy/MainActivity.kt")
-          text = path.read_text()
-          fixed = text.replace("LaunchedEffect {", "LaunchedEffect(Unit) {")
-          if fixed == text:
-              raise SystemExit("ERROR: Expected keyless LaunchedEffect call was not found")
-          path.write_text(fixed)
-          print("Fixed LaunchedEffect calls in MainActivity.kt")
+
+          if not path.exists():
+              raise SystemExit(
+                  "ERROR: MainActivity.kt was not found at: "
+                  + str(path)
+              )
+
+          text = path.read_text(encoding="utf-8")
+
+          # Fix keyless LaunchedEffect calls.
+          #
+          # Converts:
+          #     LaunchedEffect {
+          #
+          # into:
+          #     LaunchedEffect(Unit) {
+          #
+          pattern = r'LaunchedEffect\s*\{'
+
+          fixed = re.sub(
+              pattern,
+              'LaunchedEffect(Unit) {',
+              text
+          )
+
+          if fixed != text:
+              path.write_text(
+                  fixed,
+                  encoding="utf-8"
+              )
+              print("Fixed keyless LaunchedEffect calls.")
+          else:
+              print(
+                  "No keyless LaunchedEffect calls found."
+              )
+
           PY
 
-          # Keep Java and Kotlin on same JVM target.
+          echo "Configuring Java 17 compatibility..."
+
           cat >> app/build.gradle <<'EOF'
 
           android {
@@ -64,21 +98,65 @@ jobs:
                   targetCompatibility JavaVersion.VERSION_17
               }
           }
+
+          tasks.withType(
+              org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+          ).configureEach {
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
           EOF
+
+          echo "Java/Kotlin JVM target set to 17."
+
+      - name: Check project files
+        working-directory: project
+        run: |
+          echo "Checking Android project..."
+
+          test -f settings.gradle || test -f settings.gradle.kts
+          test -f app/build.gradle || test -f app/build.gradle.kts
+
+          echo "Project files found."
 
       - name: Build debug APK
         working-directory: project
-        run: gradle clean assembleDebug --no-daemon --stacktrace
+        run: |
+          set -euo pipefail
 
-      - name: Show generated APK
+          gradle clean assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      - name: Find generated APK
         working-directory: project
-        run: find . -type f -name "*.apk" -print
+        run: |
+          echo "Searching for generated APK..."
+
+          find . \
+            -type f \
+            -name "*.apk" \
+            -print
 
       - name: Rename APK
         working-directory: project
-        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/ASR-Academy.apk
+        run: |
+          set -euo pipefail
 
-      - name: Upload APK
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+              echo "ERROR: Debug APK was not generated."
+              exit 1
+          fi
+
+          cp "$APK" \
+             "app/build/outputs/apk/debug/ASR-Academy.apk"
+
+          echo "APK renamed to ASR-Academy.apk"
+
+      - name: Upload ASR Academy APK
         uses: actions/upload-artifact@v4
         with:
           name: ASR-Academy
