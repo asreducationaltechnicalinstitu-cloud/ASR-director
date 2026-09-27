@@ -18,6 +18,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Extract Android project ZIP
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -27,6 +28,8 @@ jobs:
           unzip -o ASR-Academy-Android-Project.zip -d project
 
           echo "Android project extracted successfully."
+          echo "Project contents:"
+          find project -maxdepth 2 -type f | sort | head -100
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -45,6 +48,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Checking MainActivity.kt..."
+
           python3 - <<'PY'
           import re
           from pathlib import Path
@@ -52,43 +57,41 @@ jobs:
           path = Path("app/src/main/java/pk/asr/academy/MainActivity.kt")
 
           if not path.exists():
-              raise SystemExit(
-                  "ERROR: MainActivity.kt was not found at: "
-                  + str(path)
-              )
+              print("ERROR: MainActivity.kt was not found.")
+              print("Available Kotlin files:")
+              for p in Path("app/src/main").rglob("*.kt"):
+                  print(p)
+              raise SystemExit(1)
 
           text = path.read_text(encoding="utf-8")
 
-          # Fix keyless LaunchedEffect calls.
-          #
-          # Converts:
-          #     LaunchedEffect {
-          #
-          # into:
-          #     LaunchedEffect(Unit) {
-          #
-          pattern = r'LaunchedEffect\s*\{'
+          print("MainActivity.kt found.")
 
-          fixed = re.sub(
+          # Fix keyless Compose LaunchedEffect:
+          #
+          # Before:
+          # LaunchedEffect {
+          #
+          # After:
+          # LaunchedEffect(Unit) {
+          #
+          pattern = r'\bLaunchedEffect\s*\{'
+          fixed, count = re.subn(
               pattern,
               'LaunchedEffect(Unit) {',
               text
           )
 
-          if fixed != text:
-              path.write_text(
-                  fixed,
-                  encoding="utf-8"
-              )
-              print("Fixed keyless LaunchedEffect calls.")
+          if count > 0:
+              path.write_text(fixed, encoding="utf-8")
+              print(f"Fixed {count} keyless LaunchedEffect call(s).")
           else:
-              print(
-                  "No keyless LaunchedEffect calls found."
-              )
+              print("No keyless LaunchedEffect calls found.")
 
+          print("Source fix completed.")
           PY
 
-          echo "Configuring Java 17 compatibility..."
+          echo "Applying Java 17 compile compatibility..."
 
           cat >> app/build.gradle <<'EOF'
 
@@ -98,32 +101,28 @@ jobs:
                   targetCompatibility JavaVersion.VERSION_17
               }
           }
-
-          tasks.withType(
-              org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-          ).configureEach {
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-          }
           EOF
 
-          echo "Java/Kotlin JVM target set to 17."
+          echo "Java 17 compatibility added."
 
-      - name: Check project files
+      - name: Show Gradle and project information
         working-directory: project
+        shell: bash
         run: |
-          echo "Checking Android project..."
+          echo "Gradle version:"
+          gradle --version
 
-          test -f settings.gradle || test -f settings.gradle.kts
-          test -f app/build.gradle || test -f app/build.gradle.kts
-
-          echo "Project files found."
+          echo ""
+          echo "Project files:"
+          find . -maxdepth 3 -type f | sort | head -150
 
       - name: Build debug APK
         working-directory: project
+        shell: bash
         run: |
           set -euo pipefail
+
+          echo "Starting clean Android build..."
 
           gradle clean assembleDebug \
             --no-daemon \
@@ -131,8 +130,9 @@ jobs:
 
       - name: Find generated APK
         working-directory: project
+        shell: bash
         run: |
-          echo "Searching for generated APK..."
+          echo "Searching for generated APK files..."
 
           find . \
             -type f \
@@ -141,20 +141,25 @@ jobs:
 
       - name: Rename APK
         working-directory: project
+        shell: bash
         run: |
           set -euo pipefail
 
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-              echo "ERROR: Debug APK was not generated."
+              echo "ERROR: Expected APK was not found:"
+              echo "$APK"
+              echo ""
+              echo "Available APK files:"
+              find . -type f -name "*.apk" -print
               exit 1
           fi
 
           cp "$APK" \
              "app/build/outputs/apk/debug/ASR-Academy.apk"
 
-          echo "APK renamed to ASR-Academy.apk"
+          echo "APK renamed successfully."
 
       - name: Upload ASR Academy APK
         uses: actions/upload-artifact@v4
